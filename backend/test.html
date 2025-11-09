@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pharmacy Management System Workflows</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .workflow { margin-bottom: 30px; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+        h2 { color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        h3 { color: #555; }
+        form { display: flex; flex-direction: column; gap: 10px; margin-top: 15px; }
+        input[type="text"], input[type="number"], textarea { padding: 8px; border: 1px solid #ddd; border-radius: 4px; width: 95%; }
+        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        pre { background-color: #eee; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        .response { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Pharmacy Management System Workflows</h1>
+
+    <!-- Doctor Workflow -->
+    <div class="workflow">
+        <h2>Doctor: Issue Prescription</h2>
+        <form id="issuePrescriptionForm">
+            <h3>Step 1: Create Prescription</h3>
+            <input type="text" id="doctorId" placeholder="Your Doctor ID" required>
+            <input type="text" id="patientIdForDoctor" placeholder="Patient ID" required>
+            <textarea id="prescriptionNotes" placeholder="Prescription Notes"></textarea>
+            <button type="button" onclick="createPrescription()">Create Prescription</button>
+        </form>
+        <form id="addMedicineForm">
+            <h3>Step 2: Add Medicines to Prescription</h3>
+            <input type="text" id="prescriptionIdForMedicine" placeholder="Prescription ID (from above)" required>
+            <input type="text" id="medicineId" placeholder="Medicine ID" required>
+            <input type="text" id="dosage" placeholder="Dosage (e.g., 500mg)" required>
+            <input type="text" id="frequency" placeholder="Frequency (e.g., Twice a day)" required>
+            <input type="number" id="duration" placeholder="Duration (in days)" required>
+            <button type="button" onclick="addMedicineToPrescription()">Add Medicine</button>
+        </form>
+    </div>
+
+    <!-- Pharmacist Workflow -->
+    <div class="workflow">
+        <h2>Pharmacist: Dispense Medicine</h2>
+        <form id="dispenseMedicineForm">
+            <input type="text" id="pharmacyId" placeholder="Your Pharmacy ID" required>
+            <input type="text" id="prescriptionIdForDispense" placeholder="Prescription ID" required>
+            <input type="text" id="medicineIdForDispense" placeholder="Medicine ID to Dispense" required>
+            <input type="number" id="quantityDispensed" placeholder="Quantity Dispensed" required>
+            <button type="button" onclick="dispenseMedicine()">Dispense Medicine</button>
+        </form>
+    </div>
+
+    <!-- Patient Workflow -->
+    <div class="workflow">
+        <h2>Patient: Confirm Medicine Intake</h2>
+        <form id="confirmIntakeForm">
+            <input type="text" id="patientIdForAdherence" placeholder="Your Patient ID" required>
+            <input type="text" id="medicineIdForAdherence" placeholder="Medicine ID" required>
+            <input type="checkbox" id="missedIntake"> <label for="missedIntake">I missed this dose</label>
+            <textarea id="adherenceRemarks" placeholder="Remarks (e.g., reason for missing)"></textarea>
+            <button type="button" onclick="confirmIntake()">Confirm Intake</button>
+        </form>
+    </div>
+
+    <!-- API Response Display -->
+    <div class="response">
+        <h2>API Response</h2>
+        <pre id="apiResponse"></pre>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:3000/api';
+
+        async function callApi(method, url, data = null) {
+            const options = {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+            };
+            if (data) {
+                options.body = JSON.stringify(data);
+            }
+            try {
+                const response = await fetch(url, options);
+                const result = await response.json();
+                document.getElementById('apiResponse').textContent = JSON.stringify(result, null, 2);
+                return result;
+            } catch (error) {
+                document.getElementById('apiResponse').textContent = JSON.stringify({ error: error.message }, null, 2);
+            }
+        }
+
+        async function createPrescription() {
+            const doctorId = document.getElementById('doctorId').value;
+            const patientId = document.getElementById('patientIdForDoctor').value;
+            const notes = document.getElementById('prescriptionNotes').value;
+            const result = await callApi('POST', `${API_BASE_URL}/prescriptions`, { doctorId, patientId, notes });
+            if (result && result.id) {
+                document.getElementById('prescriptionIdForMedicine').value = result.id;
+                document.getElementById('prescriptionIdForDispense').value = result.id;
+            }
+        }
+
+        async function addMedicineToPrescription() {
+            const prescriptionId = document.getElementById('prescriptionIdForMedicine').value;
+            const medicineId = document.getElementById('medicineId').value;
+            const dosage = document.getElementById('dosage').value;
+            const frequency = document.getElementById('frequency').value;
+            const duration = parseInt(document.getElementById('duration').value);
+            await callApi('POST', `${API_BASE_URL}/prescriptions/${prescriptionId}/medicines`, { medicineId, dosage, frequency, duration });
+        }
+
+        async function dispenseMedicine() {
+            const pharmacyId = document.getElementById('pharmacyId').value;
+            const prescriptionId = document.getElementById('prescriptionIdForDispense').value;
+            const medicineId = document.getElementById('medicineIdForDispense').value;
+            const quantityDispensed = parseInt(document.getElementById('quantityDispensed').value);
+            await callApi('POST', `${API_BASE_URL}/transactions`, { pharmacyId, prescriptionId, medicineId, quantityDispensed });
+        }
+
+        async function confirmIntake() {
+            const patientId = document.getElementById('patientIdForAdherence').value;
+            const medicineId = document.getElementById('medicineIdForAdherence').value;
+            const missed = document.getElementById('missedIntake').checked;
+            const remarks = document.getElementById('adherenceRemarks').value;
+            await callApi('POST', `${API_BASE_URL}/patients/${patientId}/adherence-logs`, { medicineId, missed, remarks });
+        }
+    </script>
+</body>
+</html>
