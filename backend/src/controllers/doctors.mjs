@@ -28,9 +28,20 @@ export const getDoctorById = async (req, res) => {
 
 export const createDoctor = async (req, res) => {
   try {
+    const { userId, specialization } = req.body;
+
+    // Basic validation
+    if (!userId) {
+      return res.status(400).json({ error: "Missing required field: userId" });
+    }
+    // Basic UUID validation (can be more robust with a regex if needed)
+    if (typeof userId !== 'string' || userId.length !== 36) { // Assuming UUID v4 format
+        return res.status(400).json({ error: "Invalid userId format" });
+    }
+
     const newDoctor = await db
       .insert(schema.doctors)
-      .values(req.body)
+      .values({ userId, specialization })
       .returning();
     res.status(201).json(newDoctor[0]);
   } catch (error) {
@@ -40,9 +51,25 @@ export const createDoctor = async (req, res) => {
 
 export const updateDoctor = async (req, res) => {
   try {
+    const { userId, specialization, ...otherData } = req.body;
+    const updateFields = { ...otherData };
+
+    if (userId) {
+        if (typeof userId !== 'string' || userId.length !== 36) {
+            return res.status(400).json({ error: "Invalid userId format" });
+        }
+        updateFields.userId = userId;
+    }
+    if (specialization) {
+        if (typeof specialization !== 'string') {
+            return res.status(400).json({ error: "Specialization must be a string" });
+        }
+        updateFields.specialization = specialization;
+    }
+
     const updatedDoctor = await db
       .update(schema.doctors)
-      .set(req.body)
+      .set(updateFields)
       .where(eq(schema.doctors.id, req.params.id))
       .returning();
     if (updatedDoctor.length === 0) {

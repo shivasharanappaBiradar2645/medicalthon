@@ -1,0 +1,1 @@
+ALTER TABLE "adherence_logs" ADD COLUMN "quantity_taken" integer;

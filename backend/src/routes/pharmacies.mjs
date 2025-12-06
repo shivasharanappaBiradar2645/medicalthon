@@ -8,6 +8,7 @@ import {
   getPharmacyInventory,
   addMedicineToInventory,
   updateInventory,
+  deleteInventory,
 } from "../controllers/pharmacies.mjs";
 
 const router = Router();
@@ -21,5 +22,6 @@ router.delete("/:id", deletePharmacy);
 router.get("/:id/inventory", getPharmacyInventory);
 router.post("/:id/inventory", addMedicineToInventory);
 router.put("/:id/inventory/:medicineId", updateInventory);
+router.delete("/:id/inventory/:medicineId", deleteInventory);
 
 export default router;

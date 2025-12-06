@@ -28,9 +28,25 @@ export const getPatientById = async (req, res) => {
 
 export const createPatient = async (req, res) => {
   try {
+    const { userId, contactNumber, address, ...otherData } = req.body;
+
+    // Basic validation
+    if (!userId) {
+      return res.status(400).json({ error: "Missing required field: userId" });
+    }
+    if (typeof userId !== 'string' || userId.length !== 36) {
+        return res.status(400).json({ error: "Invalid userId format" });
+    }
+    if (contactNumber && typeof contactNumber !== 'string') {
+        return res.status(400).json({ error: "Contact number must be a string" });
+    }
+    if (address && typeof address !== 'string') {
+        return res.status(400).json({ error: "Address must be a string" });
+    }
+
     const newPatient = await db
       .insert(schema.patients)
-      .values(req.body)
+      .values({ userId, contactNumber, address, ...otherData })
       .returning();
     res.status(201).json(newPatient[0]);
   } catch (error) {
@@ -40,9 +56,31 @@ export const createPatient = async (req, res) => {
 
 export const updatePatient = async (req, res) => {
   try {
+    const { userId, contactNumber, address, ...otherData } = req.body;
+    const updateFields = { ...otherData };
+
+    if (userId) {
+        if (typeof userId !== 'string' || userId.length !== 36) {
+            return res.status(400).json({ error: "Invalid userId format" });
+        }
+        updateFields.userId = userId;
+    }
+    if (contactNumber) {
+        if (typeof contactNumber !== 'string') {
+            return res.status(400).json({ error: "Contact number must be a string" });
+        }
+        updateFields.contactNumber = contactNumber;
+    }
+    if (address) {
+        if (typeof address !== 'string') {
+            return res.status(400).json({ error: "Address must be a string" });
+        }
+        updateFields.address = address;
+    }
+
     const updatedPatient = await db
       .update(schema.patients)
-      .set(req.body)
+      .set(updateFields)
       .where(eq(schema.patients.id, req.params.id))
       .returning();
     if (updatedPatient.length === 0) {
@@ -83,12 +121,36 @@ export const getPatientAdherenceLogs = async (req, res) => {
 
 export const addAdherenceLog = async (req, res) => {
   try {
+    const { medicineId, takenAt, missed, remarks, quantityTaken } = req.body;
+
+    // Basic validation
+    if (!medicineId || takenAt === undefined || missed === undefined) {
+      return res.status(400).json({ error: "Missing required fields: medicineId, takenAt, missed" });
+    }
+    if (typeof medicineId !== 'string' || medicineId.length !== 36) {
+        return res.status(400).json({ error: "Invalid medicineId format" });
+    }
+    if (isNaN(new Date(takenAt).getTime())) {
+        return res.status(400).json({ error: "Invalid takenAt date format" });
+    }
+    if (typeof missed !== 'boolean') {
+        return res.status(400).json({ error: "Missed must be a boolean" });
+    }
+    if (remarks && typeof remarks !== 'string') {
+        return res.status(400).json({ error: "Remarks must be a string" });
+    }
+    if (quantityTaken && typeof quantityTaken !== 'number') {
+        return res.status(400).json({ error: "Quantity taken must be a number" });
+    }
+
     const newAdherenceLog = await db
       .insert(schema.adherenceLogs)
-      .values({ ...req.body, patientId: req.params.id })
+      .values({ patientId: req.params.id, medicineId, takenAt: new Date(takenAt), missed, remarks, quantityTaken })
       .returning();
     res.status(201).json(newAdherenceLog[0]);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
+
+
