@@ -1,5 +1,5 @@
 // API Utility Functions
-const API_URL = 'http://localhost:3000/api';
+const API_URL = '/api';
 
 async function apiRequest(method, path, data = null) {
     try {
@@ -70,11 +70,17 @@ const createHTMLElement = (tag, attributes = {}, children = []) => {
     children.forEach(child => {
         if (typeof child === 'string') {
             element.appendChild(document.createTextNode(child));
-        } else {
+        } else if (child) {
             element.appendChild(child);
         }
     });
     return element;
+};
+
+// Helper function to create status badge
+const createStatusBadge = (status) => {
+    const statusClass = status.toLowerCase().replace('_', '-');
+    return createHTMLElement('span', { class: `status-badge status-${statusClass}` }, [status]);
 };
 
 // --- Rendering Functions ---
@@ -83,44 +89,70 @@ const renderDashboard = () => {
     const root = getAppRoot();
     root.innerHTML = ''; // Clear previous content
 
-    const dashboardContent = createHTMLElement('div', {}, [
-        createHTMLElement('h2', {}, ['Dashboard']),
-        createHTMLElement('p', {}, ['Welcome to the Medicalthon App!']),
-        createHTMLElement('p', {}, ['This is your central hub for managing prescriptions, inventory, and supply chain for palliative care drugs.']),
-        createHTMLElement('p', {}, ['Use the navigation buttons to access different sections of the application.']),
+    const dashboardContent = createHTMLElement('div', { class: 'dashboard-welcome' }, [
+        createHTMLElement('h2', {}, ['📊 Dashboard']),
+        createHTMLElement('p', {}, ['Welcome to PalliaTrack!']),
+        createHTMLElement('p', {}, ['Your comprehensive solution for managing prescriptions, inventory, and supply chain for palliative care medications.']),
+        createHTMLElement('p', {}, ['Use the navigation buttons above to access different sections of the application.']),
     ]);
     root.appendChild(dashboardContent);
 };
 
 const renderPrescriptions = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Prescriptions...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Prescriptions...</h2></div>';
 
     try {
         const prescriptions = await fetchPrescriptions();
+        const [doctors, patients, medicines] = await Promise.all([
+            fetchDoctors(),
+            fetchPatients(),
+            fetchMedicines()
+        ]);
+
+        // Create lookup maps
+        const doctorMap = new Map(doctors.map(d => [d.id, d]));
+        const patientMap = new Map(patients.map(p => [p.id, p]));
+        const medicineMap = new Map(medicines.map(m => [m.id, m]));
+
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Prescriptions']),
+            createHTMLElement('h2', {}, ['💊 Prescriptions']),
         ]);
 
         if (prescriptions.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No prescriptions found.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No prescriptions found.'])
+            ]));
         } else {
             const list = createHTMLElement('ul');
             prescriptions.forEach(p => {
+                const doctor = doctorMap.get(p.doctorId);
+                const patient = patientMap.get(p.patientId);
+
                 const listItem = createHTMLElement('li', {}, [
-                    createHTMLElement('h3', {}, [`Prescription ID: ${p.id}`]),
-                    createHTMLElement('p', {}, [`Doctor ID: ${p.doctorId}`]),
-                    createHTMLElement('p', {}, [`Patient ID: ${p.patientId}`]),
-                    createHTMLElement('p', {}, [`Status: ${p.status} | Created: ${new Date(p.createdAt).toLocaleDateString()}`]),
-                    p.notes ? createHTMLElement('p', {}, [`Notes: ${p.notes}`]) : '',
+                    createHTMLElement('h3', {}, [`Prescription #${p.id.substring(0, 8)}`]),
+                    createHTMLElement('p', {}, [`Doctor: ${doctor ? `Dr. ${doctor.specialization}` : p.doctorId}`]),
+                    createHTMLElement('p', {}, [`Patient: ${patient ? `Patient ${p.patientId.substring(0, 8)}` : p.patientId}`]),
+                    createHTMLElement('p', {}, [
+                        'Status: ',
+                        createStatusBadge(p.status),
+                        ` | Created: ${new Date(p.createdAt).toLocaleDateString()}`
+                    ]),
                 ]);
 
+                if (p.notes) {
+                    listItem.appendChild(createHTMLElement('p', {}, [`Notes: ${p.notes}`]));
+                }
+
                 if (p.prescriptionMedicines && p.prescriptionMedicines.length > 0) {
-                    const medList = createHTMLElement('ul', {}, [createHTMLElement('strong', {}, ['Medicines:'])]);
+                    const medList = createHTMLElement('ul', {}, [
+                        createHTMLElement('strong', {}, ['Prescribed Medicines:'])
+                    ]);
                     p.prescriptionMedicines.forEach(med => {
+                        const medicine = medicineMap.get(med.medicineId);
                         medList.appendChild(createHTMLElement('li', {}, [
-                            `Prescription Medicine ID: ${med.id}, Medicine ID: ${med.medicineId}, Dosage: ${med.dosage}, Freq: ${med.frequency}, Dur: ${med.duration} days, Qty: ${med.quantityPrescribed}`
+                            `${medicine ? medicine.name : med.medicineId} - ${med.dosage}, ${med.frequency}, ${med.duration} days (Qty: ${med.quantityPrescribed})`
                         ]));
                     });
                     listItem.appendChild(medList);
@@ -138,16 +170,18 @@ const renderPrescriptions = async () => {
 
 const renderCreatePrescription = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading...</h2></div>';
 
     try {
-        const doctors = await fetchDoctors();
-        const patients = await fetchPatients();
-        const medicines = await fetchMedicines();
+        const [doctors, patients, medicines] = await Promise.all([
+            fetchDoctors(),
+            fetchPatients(),
+            fetchMedicines()
+        ]);
 
         root.innerHTML = '';
         const formContainer = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Create New Prescription']),
+            createHTMLElement('h2', {}, ['✍️ Create New Prescription']),
         ]);
 
         const form = createHTMLElement('form', {
@@ -178,6 +212,9 @@ const renderCreatePrescription = async () => {
                     await createPrescription(prescriptionData);
                     showAlert('Prescription created successfully!', 'success');
                     event.target.reset();
+                    if (medicines.length > 0) {
+                        document.getElementById('dosage').value = medicines[0].dosage;
+                    }
                 } catch (error) {
                     showAlert(error.message, 'error');
                 }
@@ -185,33 +222,43 @@ const renderCreatePrescription = async () => {
         });
 
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
-            createHTMLElement('label', { for: 'doctorId' }, ['Doctor']),
+            createHTMLElement('label', { for: 'doctorId' }, ['Select Doctor']),
             createHTMLElement('select', { id: 'doctorId', required: true },
-                doctors.map(d => createHTMLElement('option', { value: d.id }, [`${d.id} (User: ${d.userId})`]))
+                doctors.map(d => createHTMLElement('option', { value: d.id }, [
+                    `Dr. ${d.specialization} (ID: ${d.id.substring(0, 8)})`
+                ]))
             ),
         ]));
+
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
-            createHTMLElement('label', { for: 'patientId' }, ['Patient']),
+            createHTMLElement('label', { for: 'patientId' }, ['Select Patient']),
             createHTMLElement('select', { id: 'patientId', required: true },
-                patients.map(p => createHTMLElement('option', { value: p.id }, [`${p.id} (User: ${p.userId})`]))
+                patients.map(p => createHTMLElement('option', { value: p.id }, [
+                    `Patient ${p.id.substring(0, 8)} (User: ${p.userId})`
+                ]))
             ),
         ]));
+
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
-            createHTMLElement('label', { for: 'status' }, ['Status']),
+            createHTMLElement('label', { for: 'status' }, ['Prescription Status']),
             createHTMLElement('select', { id: 'status' }, [
                 createHTMLElement('option', { value: 'ACTIVE' }, ['Active']),
                 createHTMLElement('option', { value: 'COMPLETED' }, ['Completed']),
                 createHTMLElement('option', { value: 'CANCELLED' }, ['Cancelled']),
             ]),
         ]));
+
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
-            createHTMLElement('label', { for: 'notes' }, ['Notes']),
-            createHTMLElement('textarea', { id: 'notes', rows: '3' }),
+            createHTMLElement('label', { for: 'notes' }, ['Additional Notes']),
+            createHTMLElement('textarea', { id: 'notes', rows: '3', placeholder: 'Enter any special instructions or notes...' }),
         ]));
 
-        form.appendChild(createHTMLElement('h4', {}, ['Medicine']));
+        form.appendChild(createHTMLElement('h4', {}, ['Medicine Details']));
+
         const medicineSelect = createHTMLElement('select', { id: 'medicineId', required: true },
-            medicines.map(m => createHTMLElement('option', { value: m.id, 'data-dosage': m.dosage }, [`${m.name} (${m.dosage})`]))
+            medicines.map(m => createHTMLElement('option', { value: m.id, 'data-dosage': m.dosage }, [
+                `${m.name} (${m.dosage}) - ${m.manufacturer}`
+            ]))
         );
         const dosageInput = createHTMLElement('input', { type: 'text', id: 'dosage', required: true, readonly: true });
 
@@ -221,28 +268,32 @@ const renderCreatePrescription = async () => {
         });
 
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
-            createHTMLElement('label', { for: 'medicineId' }, ['Medicine']),
+            createHTMLElement('label', { for: 'medicineId' }, ['Select Medicine']),
             medicineSelect,
         ]));
+
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
-            createHTMLElement('label', { for: 'dosage' }, ['Dosage']),
+            createHTMLElement('label', { for: 'dosage' }, ['Dosage (auto-filled)']),
             dosageInput,
         ]));
+
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
-            createHTMLElement('label', { for: 'frequency' }, ['Frequency']),
-            createHTMLElement('input', { type: 'text', id: 'frequency', required: true }),
+            createHTMLElement('label', { for: 'frequency' }, ['Frequency (e.g., "2 times daily")']),
+            createHTMLElement('input', { type: 'text', id: 'frequency', required: true, placeholder: 'e.g., 2 times daily' }),
         ]));
+
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
             createHTMLElement('label', { for: 'duration' }, ['Duration (days)']),
-            createHTMLElement('input', { type: 'number', id: 'duration', required: true }),
+            createHTMLElement('input', { type: 'number', id: 'duration', required: true, min: '1', placeholder: 'e.g., 30' }),
         ]));
+
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
             createHTMLElement('label', { for: 'quantityPrescribed' }, ['Quantity Prescribed']),
-            createHTMLElement('input', { type: 'number', id: 'quantityPrescribed', required: true }),
+            createHTMLElement('input', { type: 'number', id: 'quantityPrescribed', required: true, min: '1', placeholder: 'e.g., 60' }),
         ]));
 
         form.appendChild(createHTMLElement('div', { class: 'form-group', style: 'margin-top: 20px;' }, [
-            createHTMLElement('button', { type: 'submit' }, ['Create Prescription']),
+            createHTMLElement('button', { type: 'submit' }, ['✅ Create Prescription']),
         ]));
 
         formContainer.appendChild(form);
@@ -261,53 +312,69 @@ const renderCreatePrescription = async () => {
 
 const renderInventory = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Inventory...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Inventory...</h2></div>';
 
     try {
-        const pharmacies = await fetchPharmacies();
+        const [pharmacies, medicines] = await Promise.all([
+            fetchPharmacies(),
+            fetchMedicines()
+        ]);
+
         if (pharmacies.length === 0) {
-            root.innerHTML = '<h2>No pharmacies found. Please seed the database.</h2>';
+            root.innerHTML = '<div class="empty-state"><h2>No pharmacies found. Please seed the database.</h2></div>';
             return;
         }
-        const pharmacy = pharmacies[0]; // Use the first pharmacy for this demo
-        const PHARMACY_ID = pharmacy.id;
 
-        const inventoryItems = await fetchInventory(PHARMACY_ID);
+        const pharmacy = pharmacies[0];
+        const inventoryItems = await fetchInventory(pharmacy.id);
+        const medicineMap = new Map(medicines.map(m => [m.id, m]));
         
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Pharmacy Inventory']),
-            createHTMLElement('p', {}, [`Displaying inventory for: ${pharmacy.name} (ID: ${PHARMACY_ID})`]),
+            createHTMLElement('h2', {}, ['📦 Pharmacy Inventory']),
         ]);
 
+        const infoCard = createHTMLElement('div', { class: 'info-card' }, [
+            createHTMLElement('p', {}, [`📍 Pharmacy: ${pharmacy.name}`]),
+            createHTMLElement('p', {}, [`📌 Location: ${pharmacy.location}`]),
+        ]);
+        container.appendChild(infoCard);
+
         if (inventoryItems.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No inventory items found for this pharmacy.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No inventory items found for this pharmacy.'])
+            ]));
         } else {
+            const tableContainer = createHTMLElement('div', { class: 'table-container' });
             const table = createHTMLElement('table', {}, [
                 createHTMLElement('thead', {}, [
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('th', {}, ['Inventory ID']),
-                        createHTMLElement('th', {}, ['Medicine ID']),
+                        createHTMLElement('th', {}, ['Medicine Name']),
                         createHTMLElement('th', {}, ['Batch Number']),
                         createHTMLElement('th', {}, ['Quantity']),
                         createHTMLElement('th', {}, ['Expiry Date']),
-                        createHTMLElement('th', {}, ['Low Stock Threshold']),
+                        createHTMLElement('th', {}, ['Low Stock Alert']),
                         createHTMLElement('th', {}, ['Last Updated']),
                     ]),
                 ]),
-                createHTMLElement('tbody', {}, inventoryItems.map(item =>
-                    createHTMLElement('tr', {}, [
-                        createHTMLElement('td', {}, [item.id]),
-                        createHTMLElement('td', {}, [item.medicineId]),
+                createHTMLElement('tbody', {}, inventoryItems.map(item => {
+                    const medicine = medicineMap.get(item.medicineId);
+                    const isLowStock = item.quantity <= item.lowStockThreshold;
+                    
+                    return createHTMLElement('tr', {}, [
+                        createHTMLElement('td', {}, [medicine ? medicine.name : item.medicineId]),
                         createHTMLElement('td', {}, [item.batchNumber]),
-                        createHTMLElement('td', {}, [item.quantity.toString()]),
+                        createHTMLElement('td', {}, [
+                            isLowStock ? `⚠️ ${item.quantity}` : item.quantity.toString()
+                        ]),
                         createHTMLElement('td', {}, [new Date(item.expiryDate).toLocaleDateString()]),
                         createHTMLElement('td', {}, [item.lowStockThreshold.toString()]),
                         createHTMLElement('td', {}, [new Date(item.lastUpdated).toLocaleString()]),
-                    ])
-                )),
+                    ]);
+                })),
             ]);
-            container.appendChild(table);
+            tableContainer.appendChild(table);
+            container.appendChild(tableContainer);
         }
         root.appendChild(container);
     } catch (error) {
@@ -318,19 +385,20 @@ const renderInventory = async () => {
 
 const renderDispenseMedicine = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading...</h2></div>';
 
     try {
-        const pharmacies = await fetchPharmacies();
-        const prescriptions = await fetchPrescriptions();
+        const [pharmacies, prescriptions, medicines] = await Promise.all([
+            fetchPharmacies(),
+            fetchPrescriptions(),
+            fetchMedicines()
+        ]);
 
-        console.log('--- Step 2: Data fetched ---');
-        console.log('Pharmacies:', pharmacies);
-        console.log('Prescriptions:', prescriptions);
+        const medicineMap = new Map(medicines.map(m => [m.id, m]));
 
         root.innerHTML = '';
         const formContainer = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Dispense Medicine']),
+            createHTMLElement('h2', {}, ['💉 Dispense Medicine']),
         ]);
 
         const form = createHTMLElement('form', {
@@ -357,53 +425,53 @@ const renderDispenseMedicine = async () => {
         });
 
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
-            createHTMLElement('label', { for: 'dispensePharmacyId' }, ['Pharmacy']),
+            createHTMLElement('label', { for: 'dispensePharmacyId' }, ['Select Pharmacy']),
             createHTMLElement('select', { id: 'dispensePharmacyId', required: true },
-                pharmacies.map(p => createHTMLElement('option', { value: p.id }, [`${p.name} (ID: ${p.id})`]))
+                pharmacies.map(p => createHTMLElement('option', { value: p.id }, [`${p.name} (${p.location})`]))
             ),
         ]));
 
-        console.log('--- Step 3: Processing prescriptions ---');
         const prescriptionMedicines = [];
         if (prescriptions && Array.isArray(prescriptions)) {
             for (const p of prescriptions) {
-                console.log(`Processing prescription ID: ${p.id}`);
                 if (p.prescriptionMedicines && Array.isArray(p.prescriptionMedicines)) {
-                    console.log(`Found ${p.prescriptionMedicines.length} medicines for prescription ${p.id}`);
                     for (const pm of p.prescriptionMedicines) {
-                        console.log('Adding medicine to dropdown list:', pm);
                         prescriptionMedicines.push({ ...pm, prescriptionId: p.id });
                     }
-                } else {
-                    console.log(`No medicines found for prescription ${p.id}`);
                 }
             }
-        } else {
-            console.log('Prescriptions array is empty or not an array.');
         }
-        console.log('--- Step 4: Final list of prescription medicines ---');
-        console.log(prescriptionMedicines);
 
         const selectEl = createHTMLElement('select', { id: 'dispensePrescriptionMedicineId', required: true });
         if (prescriptionMedicines.length === 0) {
             selectEl.appendChild(createHTMLElement('option', { value: '' }, ['No prescription medicines available']));
         } else {
             prescriptionMedicines.forEach(pm => {
-                selectEl.appendChild(createHTMLElement('option', { value: pm.id }, [`Prescription: ${pm.prescriptionId}, Medicine: ${pm.medicineId}`]));
+                const medicine = medicineMap.get(pm.medicineId);
+                selectEl.appendChild(createHTMLElement('option', { value: pm.id }, [
+                    `Rx #${pm.prescriptionId.substring(0, 8)} - ${medicine ? medicine.name : pm.medicineId} (${pm.dosage})`
+                ]));
             });
         }
 
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
-            createHTMLElement('label', { for: 'dispensePrescriptionMedicineId' }, ['Prescription Medicine']),
+            createHTMLElement('label', { for: 'dispensePrescriptionMedicineId' }, ['Select Prescription Medicine']),
             selectEl,
         ]));
 
         form.appendChild(createHTMLElement('div', { class: 'form-group' }, [
-            createHTMLElement('label', { for: 'dispenseQuantityDispensed' }, ['Quantity Dispensed']),
-            createHTMLElement('input', { type: 'number', id: 'dispenseQuantityDispensed', required: true }),
+            createHTMLElement('label', { for: 'dispenseQuantityDispensed' }, ['Quantity to Dispense']),
+            createHTMLElement('input', { 
+                type: 'number', 
+                id: 'dispenseQuantityDispensed', 
+                required: true, 
+                min: '1',
+                placeholder: 'Enter quantity'
+            }),
         ]));
+
         form.appendChild(createHTMLElement('div', { class: 'form-group', style: 'margin-top: 20px;' }, [
-            createHTMLElement('button', { type: 'submit' }, ['Dispense Medicine']),
+            createHTMLElement('button', { type: 'submit' }, ['✅ Dispense Medicine']),
         ]));
 
         formContainer.appendChild(form);
@@ -412,43 +480,44 @@ const renderDispenseMedicine = async () => {
     } catch (error) {
         root.innerHTML = '';
         showAlert(error.message, 'error');
-        console.error('Error in renderDispenseMedicine:', error);
     }
 };
 
 const renderDistributors = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Distributors...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Distributors...</h2></div>';
 
     try {
         const distributors = await fetchDistributors();
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Distributors']),
+            createHTMLElement('h2', {}, ['🚚 Distributors']),
         ]);
 
         if (distributors.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No distributors found.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No distributors found.'])
+            ]));
         } else {
+            const tableContainer = createHTMLElement('div', { class: 'table-container' });
             const table = createHTMLElement('table', {}, [
                 createHTMLElement('thead', {}, [
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('th', {}, ['Distributor ID']),
-                        createHTMLElement('th', {}, ['Name']),
+                        createHTMLElement('th', {}, ['Distributor Name']),
                         createHTMLElement('th', {}, ['Email']),
                         createHTMLElement('th', {}, ['Contact Number']),
                     ]),
                 ]),
                 createHTMLElement('tbody', {}, distributors.map(d =>
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('td', {}, [d.id]),
                         createHTMLElement('td', {}, [d.name]),
                         createHTMLElement('td', {}, [d.email]),
                         createHTMLElement('td', {}, [d.contactNumber]),
                     ])
                 )),
             ]);
-            container.appendChild(table);
+            tableContainer.appendChild(table);
+            container.appendChild(tableContainer);
         }
         root.appendChild(container);
     } catch (error) {
@@ -459,43 +528,61 @@ const renderDistributors = async () => {
 
 const renderRestockOrders = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Restock Orders...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Restock Orders...</h2></div>';
 
     try {
-        const restockOrders = await fetchRestockOrders();
+        const [restockOrders, pharmacies, distributors, medicines] = await Promise.all([
+            fetchRestockOrders(),
+            fetchPharmacies(),
+            fetchDistributors(),
+            fetchMedicines()
+        ]);
+
+        const pharmacyMap = new Map(pharmacies.map(p => [p.id, p]));
+        const distributorMap = new Map(distributors.map(d => [d.id, d]));
+        const medicineMap = new Map(medicines.map(m => [m.id, m]));
+
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Restock Orders']),
+            createHTMLElement('h2', {}, ['📋 Restock Orders']),
         ]);
 
         if (restockOrders.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No restock orders found.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No restock orders found.'])
+            ]));
         } else {
+            const tableContainer = createHTMLElement('div', { class: 'table-container' });
             const table = createHTMLElement('table', {}, [
                 createHTMLElement('thead', {}, [
                     createHTMLElement('tr', {}, [
                         createHTMLElement('th', {}, ['Order ID']),
-                        createHTMLElement('th', {}, ['Pharmacy ID']),
-                        createHTMLElement('th', {}, ['Distributor ID']),
-                        createHTMLElement('th', {}, ['Medicine ID']),
-                        createHTMLElement('th', {}, ['Quantity Ordered']),
+                        createHTMLElement('th', {}, ['Pharmacy']),
+                        createHTMLElement('th', {}, ['Distributor']),
+                        createHTMLElement('th', {}, ['Medicine']),
+                        createHTMLElement('th', {}, ['Quantity']),
                         createHTMLElement('th', {}, ['Status']),
                         createHTMLElement('th', {}, ['Created At']),
                     ]),
                 ]),
-                createHTMLElement('tbody', {}, restockOrders.map(order =>
-                    createHTMLElement('tr', {}, [
-                        createHTMLElement('td', {}, [order.id]),
-                        createHTMLElement('td', {}, [order.pharmacyId]),
-                        createHTMLElement('td', {}, [order.distributorId]),
-                        createHTMLElement('td', {}, [order.medicineId]),
+                createHTMLElement('tbody', {}, restockOrders.map(order => {
+                    const pharmacy = pharmacyMap.get(order.pharmacyId);
+                    const distributor = distributorMap.get(order.distributorId);
+                    const medicine = medicineMap.get(order.medicineId);
+
+                    return createHTMLElement('tr', {}, [
+                        createHTMLElement('td', {}, [`#${order.id.substring(0, 8)}`]),
+                        createHTMLElement('td', {}, [pharmacy ? pharmacy.name : order.pharmacyId.substring(0, 8)]),
+                        createHTMLElement('td', {}, [distributor ? distributor.name : order.distributorId.substring(0, 8)]),
+                        createHTMLElement('td', {}, [medicine ? medicine.name : order.medicineId.substring(0, 8)]),
                         createHTMLElement('td', {}, [order.quantityOrdered.toString()]),
-                        createHTMLElement('td', {}, [order.status]),
+                        createHTMLElement('td', {}, [createStatusBadge(order.status)]),
                         createHTMLElement('td', {}, [new Date(order.createdAt).toLocaleDateString()]),
-                    ])
-                )),
+                    ]);
+                })),
             ]);
-            container.appendChild(table);
+            tableContainer.appendChild(table);
+            container.appendChild(tableContainer);
         }
         root.appendChild(container);
     } catch (error) {
@@ -506,22 +593,27 @@ const renderRestockOrders = async () => {
 
 const renderNotifications = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Notifications...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Notifications...</h2></div>';
 
     try {
         const notifications = await fetchNotifications();
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Notifications']),
+            createHTMLElement('h2', {}, ['🔔 Notifications']),
         ]);
 
         if (notifications.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No notifications found.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No notifications found.'])
+            ]));
         } else {
             const list = createHTMLElement('ul');
             notifications.forEach(n => {
+                const icon = n.isRead ? '✓' : '🔴';
                 list.appendChild(createHTMLElement('li', {}, [
-                    `ID: ${n.id}, Type: ${n.type} - ${n.message} (Created: ${new Date(n.createdAt).toLocaleString()}, Read: ${n.isRead ? 'Yes' : 'No'})`
+                    createHTMLElement('h3', {}, [`${icon} ${n.type}`]),
+                    createHTMLElement('p', {}, [n.message]),
+                    createHTMLElement('p', {}, [`Created: ${new Date(n.createdAt).toLocaleString()} | Status: ${n.isRead ? 'Read' : 'Unread'}`]),
                 ]));
             });
             container.appendChild(list);
@@ -535,23 +627,25 @@ const renderNotifications = async () => {
 
 const renderMedicines = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Medicines...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Medicines...</h2></div>';
 
     try {
         const medicines = await fetchMedicines();
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Medicines']),
+            createHTMLElement('h2', {}, ['💊 Medicines Catalog']),
         ]);
 
         if (medicines.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No medicines found.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No medicines found.'])
+            ]));
         } else {
+            const tableContainer = createHTMLElement('div', { class: 'table-container' });
             const table = createHTMLElement('table', {}, [
                 createHTMLElement('thead', {}, [
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('th', {}, ['Medicine ID']),
-                        createHTMLElement('th', {}, ['Name']),
+                        createHTMLElement('th', {}, ['Medicine Name']),
                         createHTMLElement('th', {}, ['Manufacturer']),
                         createHTMLElement('th', {}, ['Type']),
                         createHTMLElement('th', {}, ['Dosage']),
@@ -559,7 +653,6 @@ const renderMedicines = async () => {
                 ]),
                 createHTMLElement('tbody', {}, medicines.map(m =>
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('td', {}, [m.id]),
                         createHTMLElement('td', {}, [m.name]),
                         createHTMLElement('td', {}, [m.manufacturer]),
                         createHTMLElement('td', {}, [m.type]),
@@ -567,7 +660,8 @@ const renderMedicines = async () => {
                     ])
                 )),
             ]);
-            container.appendChild(table);
+            tableContainer.appendChild(table);
+            container.appendChild(tableContainer);
         }
         root.appendChild(container);
     } catch (error) {
@@ -578,35 +672,39 @@ const renderMedicines = async () => {
 
 const renderDoctors = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Doctors...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Doctors...</h2></div>';
 
     try {
         const doctors = await fetchDoctors();
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Doctors']),
+            createHTMLElement('h2', {}, ['👨‍⚕️ Doctors']),
         ]);
 
         if (doctors.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No doctors found.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No doctors found.'])
+            ]));
         } else {
+            const tableContainer = createHTMLElement('div', { class: 'table-container' });
             const table = createHTMLElement('table', {}, [
                 createHTMLElement('thead', {}, [
                     createHTMLElement('tr', {}, [
                         createHTMLElement('th', {}, ['Doctor ID']),
-                        createHTMLElement('th', {}, ['User ID']),
                         createHTMLElement('th', {}, ['Specialization']),
+                        createHTMLElement('th', {}, ['User ID']),
                     ]),
                 ]),
                 createHTMLElement('tbody', {}, doctors.map(d =>
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('td', {}, [d.id]),
-                        createHTMLElement('td', {}, [d.userId]),
+                        createHTMLElement('td', {}, [`Dr. ${d.id.substring(0, 8)}`]),
                         createHTMLElement('td', {}, [d.specialization]),
+                        createHTMLElement('td', {}, [d.userId]),
                     ])
                 )),
             ]);
-            container.appendChild(table);
+            tableContainer.appendChild(table);
+            container.appendChild(tableContainer);
         }
         root.appendChild(container);
     } catch (error) {
@@ -617,18 +715,21 @@ const renderDoctors = async () => {
 
 const renderPatients = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Patients...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Patients...</h2></div>';
 
     try {
         const patients = await fetchPatients();
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Patients']),
+            createHTMLElement('h2', {}, ['👥 Patients']),
         ]);
 
         if (patients.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No patients found.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No patients found.'])
+            ]));
         } else {
+            const tableContainer = createHTMLElement('div', { class: 'table-container' });
             const table = createHTMLElement('table', {}, [
                 createHTMLElement('thead', {}, [
                     createHTMLElement('tr', {}, [
@@ -640,14 +741,15 @@ const renderPatients = async () => {
                 ]),
                 createHTMLElement('tbody', {}, patients.map(p =>
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('td', {}, [p.id]),
+                        createHTMLElement('td', {}, [`Patient ${p.id.substring(0, 8)}`]),
                         createHTMLElement('td', {}, [p.userId]),
                         createHTMLElement('td', {}, [p.contactNumber]),
                         createHTMLElement('td', {}, [p.address]),
                     ])
                 )),
             ]);
-            container.appendChild(table);
+            tableContainer.appendChild(table);
+            container.appendChild(tableContainer);
         }
         root.appendChild(container);
     } catch (error) {
@@ -658,31 +760,32 @@ const renderPatients = async () => {
 
 const renderPharmacies = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Pharmacies...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Pharmacies...</h2></div>';
 
     try {
         const pharmacies = await fetchPharmacies();
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Pharmacies']),
+            createHTMLElement('h2', {}, ['🏥 Pharmacies']),
         ]);
 
         if (pharmacies.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No pharmacies found.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No pharmacies found.'])
+            ]));
         } else {
+            const tableContainer = createHTMLElement('div', { class: 'table-container' });
             const table = createHTMLElement('table', {}, [
                 createHTMLElement('thead', {}, [
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('th', {}, ['Pharmacy ID']),
-                        createHTMLElement('th', {}, ['Name']),
+                        createHTMLElement('th', {}, ['Pharmacy Name']),
                         createHTMLElement('th', {}, ['Location']),
                         createHTMLElement('th', {}, ['Contact']),
-                        createHTMLElement('th', {}, ['User ID']),
+                        createHTMLElement('th', {}, ['Manager ID']),
                     ]),
                 ]),
                 createHTMLElement('tbody', {}, pharmacies.map(p =>
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('td', {}, [p.id]),
                         createHTMLElement('td', {}, [p.name]),
                         createHTMLElement('td', {}, [p.location]),
                         createHTMLElement('td', {}, [p.contact]),
@@ -690,7 +793,8 @@ const renderPharmacies = async () => {
                     ])
                 )),
             ]);
-            container.appendChild(table);
+            tableContainer.appendChild(table);
+            container.appendChild(tableContainer);
         }
         root.appendChild(container);
     } catch (error) {
@@ -701,21 +805,29 @@ const renderPharmacies = async () => {
 
 const renderPatientAdherence = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading...</h2></div>';
 
     try {
-        const patients = await fetchPatients();
-        const prescriptions = await fetchPrescriptions();
+        const [patients, prescriptions, medicines] = await Promise.all([
+            fetchPatients(),
+            fetchPrescriptions(),
+            fetchMedicines()
+        ]);
+
+        const medicineMap = new Map(medicines.map(m => [m.id, m]));
 
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Patient Adherence Log']),
+            createHTMLElement('h2', {}, ['📊 Patient Adherence Log']),
         ]);
 
         const patientSelect = createHTMLElement('select', { id: 'adherencePatientId' });
         patients.forEach(p => {
-            patientSelect.appendChild(createHTMLElement('option', { value: p.id }, [`${p.id} (User: ${p.userId})`]));
+            patientSelect.appendChild(createHTMLElement('option', { value: p.id }, [
+                `Patient ${p.id.substring(0, 8)} (User: ${p.userId})`
+            ]));
         });
+        
         container.appendChild(createHTMLElement('div', { class: 'form-group' }, [
             createHTMLElement('label', { for: 'adherencePatientId' }, ['Select Patient']),
             patientSelect,
@@ -731,22 +843,28 @@ const renderPatientAdherence = async () => {
             const patientMedicines = patientPrescriptions.flatMap(p => p.prescriptionMedicines || []);
 
             if (patientMedicines.length === 0) {
-                medicinesContainer.appendChild(createHTMLElement('p', {}, ['No prescribed medicines found for this patient.']));
+                medicinesContainer.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                    createHTMLElement('p', {}, ['No prescribed medicines found for this patient.'])
+                ]));
                 return;
             }
 
+            const tableContainer = createHTMLElement('div', { class: 'table-container' });
             const table = createHTMLElement('table', {}, [
                 createHTMLElement('thead', {}, [
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('th', {}, ['Prescription ID']),
-                        createHTMLElement('th', {}, ['Medicine ID']),
+                        createHTMLElement('th', {}, ['Prescription']),
+                        createHTMLElement('th', {}, ['Medicine']),
+                        createHTMLElement('th', {}, ['Dosage']),
                         createHTMLElement('th', {}, ['Action']),
                     ]),
                 ]),
-                createHTMLElement('tbody', {}, patientMedicines.map(pm =>
-                    createHTMLElement('tr', {}, [
-                        createHTMLElement('td', {}, [pm.prescriptionId]),
-                        createHTMLElement('td', {}, [pm.medicineId]),
+                createHTMLElement('tbody', {}, patientMedicines.map(pm => {
+                    const medicine = medicineMap.get(pm.medicineId);
+                    return createHTMLElement('tr', {}, [
+                        createHTMLElement('td', {}, [`Rx #${pm.prescriptionId.substring(0, 8)}`]),
+                        createHTMLElement('td', {}, [medicine ? medicine.name : pm.medicineId]),
+                        createHTMLElement('td', {}, [pm.dosage]),
                         createHTMLElement('td', {}, [
                             createHTMLElement('button', {
                                 onclick: async () => {
@@ -762,12 +880,13 @@ const renderPatientAdherence = async () => {
                                         showAlert(error.message, 'error');
                                     }
                                 }
-                            }, ['Log Dose Taken']),
+                            }, ['✅ Log Dose Taken']),
                         ]),
-                    ])
-                )),
+                    ]);
+                })),
             ]);
-            medicinesContainer.appendChild(table);
+            tableContainer.appendChild(table);
+            medicinesContainer.appendChild(tableContainer);
         };
 
         patientSelect.addEventListener('change', renderPatientMedicines);
@@ -782,41 +901,43 @@ const renderPatientAdherence = async () => {
 
 const renderAdherenceLogs = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Adherence Logs...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Adherence Logs...</h2></div>';
 
     try {
         const adherenceLogs = await fetchAdherenceLogs();
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Adherence Logs']),
+            createHTMLElement('h2', {}, ['📈 Adherence Logs']),
         ]);
 
         if (adherenceLogs.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No adherence logs found.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No adherence logs found.'])
+            ]));
         } else {
+            const tableContainer = createHTMLElement('div', { class: 'table-container' });
             const table = createHTMLElement('table', {}, [
                 createHTMLElement('thead', {}, [
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('th', {}, ['Log ID']),
-                        createHTMLElement('th', {}, ['Patient']),
+                        createHTMLElement('th', {}, ['Patient Name']),
                         createHTMLElement('th', {}, ['Medicine']),
                         createHTMLElement('th', {}, ['Taken At']),
-                        createHTMLElement('th', {}, ['Missed']),
+                        createHTMLElement('th', {}, ['Status']),
                         createHTMLElement('th', {}, ['Remarks']),
                     ]),
                 ]),
                 createHTMLElement('tbody', {}, adherenceLogs.map(log =>
                     createHTMLElement('tr', {}, [
-                        createHTMLElement('td', {}, [log.id]),
                         createHTMLElement('td', {}, [log.patient.user.name]),
                         createHTMLElement('td', {}, [log.medicine.name]),
                         createHTMLElement('td', {}, [new Date(log.takenAt).toLocaleString()]),
-                        createHTMLElement('td', {}, [log.missed ? 'Yes' : 'No']),
-                        createHTMLElement('td', {}, [log.remarks || '']),
+                        createHTMLElement('td', {}, [log.missed ? '❌ Missed' : '✅ Taken']),
+                        createHTMLElement('td', {}, [log.remarks || '-']),
                     ])
                 )),
             ]);
-            container.appendChild(table);
+            tableContainer.appendChild(table);
+            container.appendChild(tableContainer);
         }
         root.appendChild(container);
     } catch (error) {
@@ -827,64 +948,79 @@ const renderAdherenceLogs = async () => {
 
 const renderDistributorDashboard = async () => {
     const root = getAppRoot();
-    root.innerHTML = '<h2>Loading Distributor Dashboard...</h2>';
+    root.innerHTML = '<div class="loading-spinner"><h2>Loading Distributor Dashboard...</h2></div>';
 
     try {
-        const restockOrders = await fetchRestockOrders();
+        const [restockOrders, pharmacies, medicines] = await Promise.all([
+            fetchRestockOrders(),
+            fetchPharmacies(),
+            fetchMedicines()
+        ]);
+
+        const pharmacyMap = new Map(pharmacies.map(p => [p.id, p]));
+        const medicineMap = new Map(medicines.map(m => [m.id, m]));
+
         root.innerHTML = '';
         const container = createHTMLElement('div', {}, [
-            createHTMLElement('h2', {}, ['Distributor Dashboard']),
+            createHTMLElement('h2', {}, ['🚛 Distributor Dashboard']),
         ]);
 
         if (restockOrders.length === 0) {
-            container.appendChild(createHTMLElement('p', {}, ['No restock orders found.']));
+            container.appendChild(createHTMLElement('div', { class: 'empty-state' }, [
+                createHTMLElement('p', {}, ['No restock orders found.'])
+            ]));
         } else {
+            const tableContainer = createHTMLElement('div', { class: 'table-container' });
             const table = createHTMLElement('table', {}, [
                 createHTMLElement('thead', {}, [
                     createHTMLElement('tr', {}, [
                         createHTMLElement('th', {}, ['Order ID']),
-                        createHTMLElement('th', {}, ['Pharmacy ID']),
-                        createHTMLElement('th', {}, ['Medicine ID']),
-                        createHTMLElement('th', {}, ['Quantity Ordered']),
+                        createHTMLElement('th', {}, ['Pharmacy']),
+                        createHTMLElement('th', {}, ['Medicine']),
+                        createHTMLElement('th', {}, ['Quantity']),
                         createHTMLElement('th', {}, ['Status']),
                         createHTMLElement('th', {}, ['Actions']),
                     ]),
                 ]),
-                createHTMLElement('tbody', {}, restockOrders.map(order =>
-                    createHTMLElement('tr', {}, [
-                        createHTMLElement('td', {}, [order.id]),
-                        createHTMLElement('td', {}, [order.pharmacyId]),
-                        createHTMLElement('td', {}, [order.medicineId]),
+                createHTMLElement('tbody', {}, restockOrders.map(order => {
+                    const pharmacy = pharmacyMap.get(order.pharmacyId);
+                    const medicine = medicineMap.get(order.medicineId);
+
+                    return createHTMLElement('tr', {}, [
+                        createHTMLElement('td', {}, [`#${order.id.substring(0, 8)}`]),
+                        createHTMLElement('td', {}, [pharmacy ? pharmacy.name : order.pharmacyId.substring(0, 8)]),
+                        createHTMLElement('td', {}, [medicine ? medicine.name : order.medicineId.substring(0, 8)]),
                         createHTMLElement('td', {}, [order.quantityOrdered.toString()]),
-                        createHTMLElement('td', {}, [order.status]),
+                        createHTMLElement('td', {}, [createStatusBadge(order.status)]),
                         createHTMLElement('td', {}, [
                             createHTMLElement('button', {
                                 onclick: async () => {
                                     try {
                                         await updateRestockOrder(order.id, { status: 'SHIPPED' });
-                                        showAlert('Order status updated to SHIPPED!', 'success');
-                                        renderDistributorDashboard(); // Refresh the dashboard
+                                        showAlert('Order marked as SHIPPED!', 'success');
+                                        renderDistributorDashboard();
                                     } catch (error) {
                                         showAlert(error.message, 'error');
                                     }
                                 }
-                            }, ['Mark as Shipped']),
+                            }, ['📦 Mark Shipped']),
                             createHTMLElement('button', {
                                 onclick: async () => {
                                     try {
                                         await updateRestockOrder(order.id, { status: 'COMPLETED' });
-                                        showAlert('Order status updated to COMPLETED!', 'success');
-                                        renderDistributorDashboard(); // Refresh the dashboard
+                                        showAlert('Order marked as COMPLETED!', 'success');
+                                        renderDistributorDashboard();
                                     } catch (error) {
                                         showAlert(error.message, 'error');
                                     }
                                 }
-                            }, ['Mark as Completed']),
+                            }, ['✅ Mark Completed']),
                         ]),
-                    ])
-                )),
+                    ]);
+                })),
             ]);
-            container.appendChild(table);
+            tableContainer.appendChild(table);
+            container.appendChild(tableContainer);
         }
         root.appendChild(container);
     } catch (error) {
