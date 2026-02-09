@@ -1,6 +1,6 @@
 import * as schema from "../models/schema.mjs";
 import { db } from "../models/db.mjs";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 export const getAllRestockOrders = async (req, res) => {
   try {
@@ -40,15 +40,72 @@ export const createRestockOrder = async (req, res) => {
 
 export const updateRestockOrder = async (req, res) => {
   try {
-    const updatedRestockOrder = await db
-      .update(schema.restockOrders)
-      .set(req.body)
-      .where(eq(schema.restockOrders.id, req.params.id))
-      .returning();
-    if (updatedRestockOrder.length === 0) {
-      return res.status(404).json({ message: "Restock order not found" });
+    const result = await db.transaction(async (tx) => {
+      // Get the current restock order
+      const currentOrderResult = await tx
+        .select()
+        .from(schema.restockOrders)
+        .where(eq(schema.restockOrders.id, req.params.id));
+
+      if (currentOrderResult.length === 0) {
+        tx.rollback();
+        return { error: "Restock order not found", status: 404 };
+      }
+
+      const currentOrder = currentOrderResult[0];
+
+      // Update the restock order
+      const [updatedRestockOrder] = await tx
+        .update(schema.restockOrders)
+        .set(req.body)
+        .where(eq(schema.restockOrders.id, req.params.id))
+        .returning();
+
+      // If status is being changed to COMPLETED, update inventory
+      if (req.body.status === "COMPLETED" && currentOrder.status !== "COMPLETED") {
+        // Check if inventory item exists
+        const existingInventory = await tx
+          .select()
+          .from(schema.inventory)
+          .where(
+            and(
+              eq(schema.inventory.pharmacyId, currentOrder.pharmacyId),
+              eq(schema.inventory.medicineId, currentOrder.medicineId)
+            )
+          );
+
+        if (existingInventory.length > 0) {
+          // Update existing inventory by adding the ordered quantity
+          await tx
+            .update(schema.inventory)
+            .set({
+              quantity: existingInventory[0].quantity + currentOrder.quantityOrdered,
+              lastUpdated: new Date(),
+            })
+            .where(eq(schema.inventory.id, existingInventory[0].id));
+        } else {
+          // Create new inventory entry
+          await tx
+            .insert(schema.inventory)
+            .values({
+              pharmacyId: currentOrder.pharmacyId,
+              medicineId: currentOrder.medicineId,
+              batchNumber: `BATCH-${Date.now()}`,
+              quantity: currentOrder.quantityOrdered,
+              expiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year from now as default
+              lowStockThreshold: 10,
+            });
+        }
+      }
+
+      return { data: updatedRestockOrder };
+    });
+
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
     }
-    res.json(updatedRestockOrder[0]);
+
+    res.json(result.data);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

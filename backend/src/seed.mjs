@@ -33,7 +33,7 @@ async function seed() {
     ];
     const [drAlice, bobPharmacist, charliePatient, dianaDistributor, eveAdmin] = await db.insert(schema.users).values(usersToInsert).returning();
 
-    // --- Create Profiles ---
+    
     console.log('Creating profiles...');
     const [doctor] = await db.insert(schema.doctors).values({ userId: drAlice.id, specialization: 'Palliative Care' }).returning();
     const [patient] = await db.insert(schema.patients).values({ userId: charliePatient.id, contactNumber: '123-456-7890', address: '123 Main St' }).returning();
